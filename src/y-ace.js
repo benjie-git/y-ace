@@ -14,8 +14,9 @@ const Range = Ace.require('ace/range').Range
   Small class for tracking cursors/selection in Ace Editor
  */
 class AceCursors{
-  constructor(ace){
+  constructor(ace, bindings){
     this.ace = ace
+    this.bindings = bindings
     this.marker = {}
     this.marker.self = this
     this.markerID = {}
@@ -49,7 +50,7 @@ class AceCursors{
             el.id = this.self.aceID + '_cursor_' + pos.id
             el.className = 'cursor'
             el.style.position = 'absolute'
-            el.innerHTML = '<div class="cursor-label" style="background: '+pos.color+';top: -1.8em;white-space: nowrap;">'+pos.name+'</div>'
+            el.innerHTML = '<div class="cursor-label" style="background: '+pos.color+';top: -1.8em;opacity:0.5;white-space: nowrap; width:3px;"></div>'
             this.self.ace.container.appendChild(el)
           }else{
             el.style.height = height + 'px'
@@ -75,7 +76,9 @@ class AceCursors{
   }
 
   updateCursors(cur, cid){
-    if(cur !== undefined && cur.hasOwnProperty('cursor')){
+    if (cid == this.bindings.doc.clientID) return;
+
+    if(cur !== undefined && cur.hasOwnProperty('cursor') && cur.hasOwnProperty('editorName') && cur.editorName == this.bindings.editorName){
       let c = cur.cursor
       let pos = this.ace.getSession().doc.indexToPosition(c.pos)
 
@@ -93,7 +96,7 @@ class AceCursors{
 
         let customStyle = document.getElementById('style_' + c.id)
         if(customStyle){
-          customStyle.innerHTML = '.selection-' + c.id + ' { position: absolute; z-index: 20; opacity: 0.5; background: '+c.color+'; }'
+          customStyle.innerHTML = '.selection-' + c.id + ' { position: absolute; z-index: 20; opacity: 0.3; background: '+c.color+'; }'
         }else{
           let style = document.createElement('style')
           style.type = 'text/css'
@@ -126,22 +129,27 @@ class AceCursors{
 
 export class AceBinding {
   /**
-   * @param {Y.Text} type
    * @param {any} ace
    * @param {Awareness} [awareness]
    */
-  constructor (type, ace, awareness) {
+  constructor (editorName, doc, ace, awareness) {
     const mux = createMutex()
-    const doc = /** @type {Y.Doc} */ (type.doc)
     this.mux = mux
-    this.type = type
+    this.editorName = editorName
     this.doc = doc
     this.ace = ace
     this.ace.session.getUndoManager().reset()
-    this.aceCursors = new AceCursors(this.ace)
-
-
+    this.aceCursors = new AceCursors(this.ace, this)
     this.awareness = awareness
+
+    this.setEditorName = (newEditorName) => {
+      this.editorName = newEditorName
+      function updateCurs(value, key, map) {
+        this.aceCursors.updateCursors(value, key)
+      }
+      this.awareness.getStates().forEach(updateCurs)
+    }
+
     this._awarenessChange = ({ added, removed, updated }) => {
       this.aceCursors.marker.cursors = []
       const states = /** @type {Awareness} */ (this.awareness).getStates()
@@ -160,48 +168,6 @@ export class AceBinding {
 
       this.aceCursors.marker.redraw()
     }
-
-    this._typeObserver = event => {
-      const aceDocument = this.ace.getSession().getDocument()
-      mux(() => {
-        const delta = event.delta
-        let currentPos = 0
-        for (const op of delta) {
-          if (op.retain) {
-            currentPos += op.retain
-          } else if (op.insert) {
-            const start = aceDocument.indexToPosition(currentPos, 0)
-            aceDocument.insert(start, op.insert)
-            currentPos += op.insert.length
-          } else if (op.delete) {
-            const start = aceDocument.indexToPosition(currentPos, 0)
-            const end = aceDocument.indexToPosition(currentPos + op.delete, 0)
-            const range = new Range(start.row, start.column, end.row, end.column)
-            aceDocument.remove(range)
-          }
-        }
-        this._cursorObserver()
-      })
-    }
-    type.observe(this._typeObserver)
-
-    this._aceObserver = (eventType, delta) => {
-      const aceDocument = this.ace.getSession().getDocument()
-        mux(() => {
-          if (eventType.action === 'insert') {
-            const start = aceDocument.positionToIndex(eventType.start, 0)
-            type.insert(start, eventType.lines.join('\n'))
-          } else if (eventType.action === 'remove') {
-            const start = aceDocument.positionToIndex(eventType.start, 0)
-            const length = eventType.lines.join('\n').length
-            type.delete(start, length)
-          }
-
-          type.applyDelta(eventType)
-          this._cursorObserver()
-        })
-    }
-    this.ace.on('change', this._aceObserver)
 
     this._cursorObserver = () => {
       let user = this.awareness.getLocalState().user
@@ -228,10 +194,12 @@ export class AceBinding {
       const aw = /** @type {any} */ (this.awareness.getLocalState())
       if (curSel === null) {
         if (this.awareness.getLocalState() !== null) {
+          this.awareness.setLocalStateField('editorName', this.editorName)
           this.awareness.setLocalStateField('cursor', /** @type {any} */ (null))
         }
       } else {
         if (!aw || !aw.cursor || cursor.anchor !== aw.cursor.anchor || cursor.head  !== aw.cursor.head) {
+          this.awareness.setLocalStateField('editorName', this.editorName)
           this.awareness.setLocalStateField('cursor', cursor)
         }
       }
@@ -247,7 +215,6 @@ export class AceBinding {
 
   destroy () {
     console.log('destroyed')
-    this.type.unobserve(this._typeObserver)
     this.ace.off('change', this._aceObserver)
     if (this.awareness) {
       this.awareness.off('change', this._awarenessChange)
