@@ -50,7 +50,7 @@ class AceCursors{
             el.id = this.self.aceID + '_cursor_' + pos.id
             el.className = 'cursor'
             el.style.position = 'absolute'
-            el.innerHTML = '<div class="cursor-label" style="background: '+pos.color+';top: -1.8em;opacity:0.5;white-space: nowrap; width:3px;"></div>'
+            el.innerHTML = '<div class="cursor-label" style="background: '+pos.color+';top: -1.8em;opacity:0.5;white-space: nowrap; pointer-events:none; cursor:auto; width:3px;"></div>'
             this.self.ace.container.appendChild(el)
           }else{
             el.style.height = height + 'px'
@@ -85,8 +85,6 @@ class AceCursors{
       let curCursor = {row:pos.row, column:pos.column, color:c.color, id:c.id, name:c.name}
 
        // handle selection
-      console.log("Sel: " + c.sel)
-
        if(c.sel){
         if(this.markerID[c.id] !== undefined && this.markerID[c.id].hasOwnProperty('sel') && this.markerID[c.id].sel !== undefined){
           this.ace.session.removeMarker(this.markerID[c.id].sel)
@@ -98,7 +96,7 @@ class AceCursors{
 
         let customStyle = document.getElementById('style_' + c.id)
         if(customStyle){
-          customStyle.innerHTML = '.selection-' + c.id + ' { position: absolute; z-index: 20; opacity: 0.3; background: '+c.color+'; }'
+          customStyle.innerHTML = '.selection-' + c.id + ' { position: absolute; z-index: 20; opacity: 0.3; pointer-events:none; cursor:auto; background: '+c.color+'; }'
         }else{
           let style = document.createElement('style')
           style.type = 'text/css'
@@ -115,6 +113,13 @@ class AceCursors{
       }
 
       this.marker.cursors.push(curCursor)
+
+      let el = document.getElementById(this.aceID + '_cursor_'+cid)
+      if (el) {
+        el.style["cursor"] = "auto"
+        el.style["pointer-events"] = "none"
+      }
+
     }else{
       let el = document.getElementById(this.aceID + '_cursor_'+cid)
       if(el){
@@ -143,35 +148,42 @@ export class AceBinding {
     this.ace.session.getUndoManager().reset()
     this.aceCursors = new AceCursors(this.ace, this)
     this.awareness = awareness
+    this.updatingCursors = false
 
     this.setEditorName = (newEditorName) => {
       this.editorName = newEditorName
+      let curs = this.aceCursors
       function updateCurs(value, key, map) {
-        this.aceCursors.updateCursors(value, key)
+        curs.updateCursors(value, key)
       }
-      this.awareness.getStates().forEach(updateCurs)
+      if (curs) {
+        this.awareness.getStates().forEach(updateCurs)
+      }
+      this._cursorObserver()
     }
 
     this._awarenessChange = ({ added, removed, updated }) => {
       this.aceCursors.marker.cursors = []
       const states = /** @type {Awareness} */ (this.awareness).getStates()
+      this.updatingCursors = true
       added.forEach(id => {
-        // console.log('added: ' + id)
         this.aceCursors.updateCursors(states.get(id), id)
       })
       updated.forEach(id => {
-        // console.log('updated: ' + id)
         this.aceCursors.updateCursors(states.get(id), id)
       })
       removed.forEach(id => {
-        // console.log('removed: ' + id)
         this.aceCursors.updateCursors(states.get(id), id)
       })
 
       this.aceCursors.marker.redraw()
+      this.updatingCursors = false
     }
 
     this._cursorObserver = () => {
+      if (this.updatingCursors) return
+      if (!this.ace.isFocused()) return;
+
       let user = this.awareness.getLocalState().user
       let curSel = this.ace.getSession().selection
       let cursor = {id:doc.clientID, name:user.name, sel:true, color:user.color}
@@ -196,19 +208,24 @@ export class AceBinding {
       const aw = /** @type {any} */ (this.awareness.getLocalState())
       if (curSel === null) {
         if (this.awareness.getLocalState() !== null) {
-          this.awareness.setLocalStateField('editorName', this.editorName)
-          this.awareness.setLocalStateField('cursor', /** @type {any} */ (null))
+          let s = this.awareness.getLocalState()
+          s.editorName = this.editorName
+          s.cursor = null
+          this.awareness.setLocalState(s)
         }
       } else {
         if (!aw || !aw.cursor || cursor.anchor !== aw.cursor.anchor || cursor.head  !== aw.cursor.head) {
-          this.awareness.setLocalStateField('editorName', this.editorName)
-          this.awareness.setLocalStateField('cursor', cursor)
+          let s = this.awareness.getLocalState()
+          s.editorName = this.editorName
+          s.cursor = cursor
+          this.awareness.setLocalState(s)
         }
       }
     }
 
     // update cursors
     this.ace.getSession().selection.on('changeCursor', ()=>this._cursorObserver())
+    this._cursorObserver()
 
     if (this.awareness) {
       this.awareness.on('change', this._awarenessChange)
@@ -216,7 +233,6 @@ export class AceBinding {
   }
 
   destroy () {
-    console.log('destroyed')
     this.ace.off('change', this._aceObserver)
     if (this.awareness) {
       this.awareness.off('change', this._awarenessChange)
