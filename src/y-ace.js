@@ -85,6 +85,8 @@ class AceCursors{
       let curCursor = {row:pos.row, column:pos.column, color:c.color, id:c.id, name:c.name}
 
        // handle selection
+      console.log("Sel: " + c.sel)
+
        if(c.sel){
         if(this.markerID[c.id] !== undefined && this.markerID[c.id].hasOwnProperty('sel') && this.markerID[c.id].sel !== undefined){
           this.ace.session.removeMarker(this.markerID[c.id].sel)
