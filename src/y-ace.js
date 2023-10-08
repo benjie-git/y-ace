@@ -17,12 +17,12 @@ class AceCursors{
   constructor(ace, bindings){
     this.ace = ace
     this.bindings = bindings
+    this.aceID = this.ace.container.id
+
     this.marker = {}
     this.marker.self = this
     this.markerID = {}
     this.marker.cursors = []
-    this.aceID = this.ace.container.id
-
     this.marker.update = function(html, markerLayer, session, config) {
       let start = config.firstRow, end = config.lastRow
       let cursors = this.cursors
@@ -50,18 +50,18 @@ class AceCursors{
             el.id = this.self.aceID + '_cursor_' + pos.id
             el.className = 'cursor'
             el.style.position = 'absolute'
-            el.innerHTML = '<div class="cursor-label" style="background: '+pos.color+';top: -1.8em;opacity:0.5;white-space: nowrap; pointer-events:none; cursor:auto; width:3px;"></div>'
-            this.self.ace.container.appendChild(el)
-          }else{
-            el.style.height = height + 'px'
-            el.style.width = width + 'px'
-            el.style.top = top + 'px'
-            el.style.left = left + 'px'
-            el.style.borderLeft = '2px solid ' + pos.color
+            el.style['pointer-events'] = 'none'
             el.style.zIndex = 100
-            el.style.color = '#000'
-            el.style.cursor = 'help'
+            el.style.opacity = 0.5
+            el.style.background = pos.color
+            el.style.color = pos.color
+            el.style.border = '0'
+            el.style.width = "3px"
+            this.self.ace.container.appendChild(el)
           }
+          el.style.height = height + 'px'
+          el.style.top = top + 'px'
+          el.style.left = (left-2) + 'px'
         }
       }
 
@@ -94,19 +94,19 @@ class AceCursors{
         let anchor = this.ace.getSession().doc.indexToPosition(c.anchor)
         let head = this.ace.getSession().doc.indexToPosition(c.head)
 
-        let customStyle = document.getElementById('style_' + c.id)
-        if(customStyle){
-          customStyle.innerHTML = '.selection-' + c.id + ' { position: absolute; z-index: 20; opacity: 0.3; pointer-events:none; cursor:auto; background: '+c.color+'; }'
-        }else{
+        if(!document.getElementById('style_' + c.id)){
           let style = document.createElement('style')
           style.type = 'text/css'
           style.id = 'style_' + c.id
           document.getElementsByTagName('head')[0].appendChild(style)
         }
+        let customStyle = document.getElementById('style_' + c.id)
+        customStyle.innerHTML = '.selection-' + c.id + ' { position: absolute; z-index: 20; opacity: 0.3; pointer-events:none; cursor:auto; background: '+c.color+'; }'
 
         this.markerID[c.id] = {id:c.id, sel:this.ace.session.addMarker(new Range(anchor.row, anchor.column, head.row, head.column), 'selection-' + c.id, 'text')}
       }else{
         if(this.markerID[c.id] !== undefined && this.markerID[c.id].hasOwnProperty('sel') && this.markerID[c.id].sel !== undefined){
+          // console.log("clear")
           this.ace.session.removeMarker(this.markerID[c.id].sel)
           this.markerID[c.id].sel = undefined
         }
@@ -181,8 +181,12 @@ export class AceBinding {
     }
 
     this._cursorObserver = () => {
+      this._updateForCursorChange(false)
+    }
+
+    this._updateForCursorChange = (force) => {
       if (this.updatingCursors) return
-      if (!this.ace.isFocused()) return;
+      if (!this.ace.isFocused() && !force) return;
 
       let user = this.awareness.getLocalState().user
       let curSel = this.ace.getSession().selection
@@ -224,7 +228,7 @@ export class AceBinding {
     }
 
     // update cursors
-    this.ace.getSession().selection.on('changeCursor', ()=>this._cursorObserver())
+    this.ace.getSession().selection.on('changeCursor', this._cursorObserver)
     this._cursorObserver()
 
     if (this.awareness) {
@@ -233,7 +237,7 @@ export class AceBinding {
   }
 
   destroy () {
-    this.ace.off('change', this._aceObserver)
+    this.ace.getSession().selection.off('changeCursor', this._cursorObserver)
     if (this.awareness) {
       this.awareness.off('change', this._awarenessChange)
     }
